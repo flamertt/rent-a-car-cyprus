@@ -29,11 +29,17 @@ internal sealed class SimulationRuntime(IClock clock)
         clock.SetSpeed(Running ? Speed : 0);
     }
 
-    public void BeginCatchUp(double speed)
+    /// <summary>
+    /// Hızlı ileri sarma: saat durur, her karede <see cref="StepCatchUp"/> ile sabit adım ilerler. Saat duvar saatiyle
+    /// aksaydı uzun süren bir kare (toplu rota isteği) saatlerce simüle zamanı atlardı; teslimatlar kaçar, müşteri "gelmedi" düşerdi.
+    /// </summary>
+    public void BeginCatchUp()
     {
         CatchingUp = true;
-        clock.SetSpeed(Running ? Math.Clamp(speed, 1, 3600) : 0);
+        clock.SetSpeed(0);
     }
+
+    public void StepCatchUp(TimeSpan step) => clock.Reset(clock.UtcNow + step);
 
     /// <summary>Gerçek saate yetişildi: saat tam gerçek ana oturtulur ve normal hıza dönülür.</summary>
     public void EndCatchUp(DateTimeOffset realNow)

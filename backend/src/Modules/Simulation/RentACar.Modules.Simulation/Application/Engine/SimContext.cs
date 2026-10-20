@@ -46,6 +46,19 @@ internal sealed class SimContext(
         return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(local, KktcTime.Zone), TimeSpan.Zero);
     }
 
+    /// <summary>
+    /// Merkezin <paramref name="radiusMeters"/> çevresinde rastgele nokta (düzgün disk): her müşterinin kendi oteli,
+    /// gezi noktasında farklı park yeri — araçlar aynı noktadan aynı rotaya dizilmesin. Rota ucu yola oturur.
+    /// </summary>
+    public static GeoPoint Scatter(GeoPoint center, double radiusMeters, Random rng)
+    {
+        var r = radiusMeters * Math.Sqrt(rng.NextDouble());
+        var angle = rng.NextDouble() * 2 * Math.PI;
+        const double metersPerDegreeLat = 111_320;
+        var metersPerDegreeLon = metersPerDegreeLat * Math.Cos(center.Lat * Math.PI / 180);
+        return new GeoPoint(center.Lon + r * Math.Sin(angle) / metersPerDegreeLon, center.Lat + r * Math.Cos(angle) / metersPerDegreeLat);
+    }
+
     /// <summary>Yönlendirme yapmadan kaba süre tahmini (planlama için): %30 dolambaç, 55 km/s.</summary>
     public static TimeSpan EstimateTravel(GeoPoint from, GeoPoint to) =>
         TimeSpan.FromHours(GeoMath.DistanceMeters(from, to) * 1.3 / 1000 / 55);

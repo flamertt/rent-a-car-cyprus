@@ -48,6 +48,11 @@ internal sealed class FleetInitializer(
     {
         var existing = await db.Vehicles.CountAsync(v => v.Status != VehicleStatus.Retired, ct);
         var target = options.Value.TargetSize;
+        if (existing > target)
+        {
+            logger.LogWarning("Filo {Existing} araç, hedef {Target}; fazla araç silinmez (küçültmek için simülasyon verisini sıfırlayın)", existing, target);
+        }
+
         if (existing >= target)
         {
             return;

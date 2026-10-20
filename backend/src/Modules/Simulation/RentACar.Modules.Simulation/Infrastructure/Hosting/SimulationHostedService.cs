@@ -10,7 +10,7 @@ namespace RentACar.Modules.Simulation.Infrastructure.Hosting;
 
 /// <summary>
 /// Simülasyon döngüsü: her karede (varsayılan 500 ms gerçek zaman) yeni DI kapsamında bir <see cref="SimulationTick"/>.
-/// Gerçek zamana kilitliyken saat geride kalırsa yetişme hızına geçer, yetişince 1×'e döner.
+/// Gerçek zamana kilitliyken saat geride kalırsa hızlı ileri sarar (her karede sabit adım), yetişince 1×'e döner.
 /// </summary>
 internal sealed class SimulationHostedService(
     IServiceScopeFactory scopes,
@@ -58,12 +58,24 @@ internal sealed class SimulationHostedService(
         if (lag > MaxLag && !runtime.CatchingUp)
         {
             logger.LogInformation("Saat gerçek zamanın {Lag} gerisinde; hızlı ileri sarılıyor", lag);
-            runtime.BeginCatchUp(options.Value.CatchUpSpeed);
+            runtime.BeginCatchUp();
         }
-        else if (lag <= TimeSpan.Zero && runtime.CatchingUp)
+
+        if (!runtime.CatchingUp)
+        {
+            return;
+        }
+
+        var o = options.Value;
+        var step = TimeSpan.FromMilliseconds(Math.Max(100, o.TickMilliseconds) * Math.Max(1, o.CatchUpSpeed));
+        if (lag <= step)
         {
             runtime.EndCatchUp(realNow);
             logger.LogInformation("Gerçek zamana yetişildi");
+        }
+        else
+        {
+            runtime.StepCatchUp(step);
         }
     }
 }

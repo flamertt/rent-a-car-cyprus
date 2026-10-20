@@ -9,5 +9,5 @@ internal sealed class FleetSeedOptions
     /// Filo büyüklüğü (emekliler hariç). Açılışta filo bunun altındaysa model karışımı ve şube payları korunarak
     /// tamamlanır; üstündeyse araç silinmez.
     /// </summary>
-    public int TargetSize { get; set; } = 300;
+    public int TargetSize { get; set; } = 100;
 }

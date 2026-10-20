@@ -112,10 +112,6 @@ namespace RentACar.Modules.Fleet.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_vehicles");
 
-                    b.HasIndex("ParkingSlot")
-                        .IsUnique()
-                        .HasDatabaseName("ix_vehicles_parking_slot");
-
                     b.HasIndex("Plate")
                         .IsUnique()
                         .HasDatabaseName("ix_vehicles_plate");
@@ -124,6 +120,9 @@ namespace RentACar.Modules.Fleet.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_vehicles_position");
 
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Position"), "gist");
+
+                    b.HasIndex("BranchId", "ParkingSlot")
+                        .HasDatabaseName("ix_vehicles_branch_id_parking_slot");
 
                     b.HasIndex("CategoryId", "Status")
                         .HasDatabaseName("ix_vehicles_category_id_status");

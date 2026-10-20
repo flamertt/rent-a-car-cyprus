@@ -17,10 +17,22 @@ namespace RentACar.Modules.Simulation.Application.Engine;
 /// Günlük talep = filo × aylık doluluk ÷ ortalama kiralama süresi; doluluk Turizm Planlama Dairesi 2026
 /// verisinden (Ağustos %69, Şubat–Mart ~%27, yıl ortalaması %43; docs/KKTC-VERI-KAYNAKLARI.md §5.2).
 /// Kiralamaların çoğu Ercan'dan başlar (havayolu girişlerinin %96'sı), bir kısmı Larnaka'dan gelenler için sınır kapılarından.
+/// Güçlü filo varsayımı: kirada araç oranı <see cref="SimulationOptions.TargetUtilization"/> civarında tutulur. Düzenli
+/// talep tek başına hedefi aşmaz; açık kısa vadeli (1,5–6 saat sonra teslim) taleple kapanır; 24 saat içindeki teslimlerde
+/// <see cref="SimulationOptions.MaxUtilization"/> tavanı aşılmaz.
 /// </summary>
 internal sealed class DemandGenerator(IReservationsApi reservations, IOptions<SimulationOptions> options, EventLog log)
 {
     private const double AverageRentalDays = 5.5;
+
+    /// <summary>Doluluk açığının günde kaç katı kadar kısa vadeli talep (≈ 4 saatlik zaman sabiti).</summary>
+    private const double WalkInFillPerDay = 6;
+
+    /// <summary>Kısa vadeli talep teslimleri en geç bu kadar sonra; açık bu andaki kirada araç sayısına göre ölçülür.</summary>
+    private static readonly TimeSpan WalkInHorizon = TimeSpan.FromHours(6);
+
+    /// <summary>Tavan bu kadar içindeki teslimlere uygulanır (bilinen teslimler bu ufka kadar okunur).</summary>
+    private static readonly TimeSpan CeilingHorizon = TimeSpan.FromHours(24);
 
     private static readonly CultureInfo Tr = CultureInfo.GetCultureInfo("tr-TR");
 
@@ -41,6 +53,9 @@ internal sealed class DemandGenerator(IReservationsApi reservations, IOptions<Si
     private static readonly (int Days, double Weight)[] Durations =
         [(1, 5), (2, 8), (3, 14), (4, 14), (5, 14), (6, 9), (7, 16), (10, 8), (14, 9), (21, 3)];
 
+    /// <summary><see cref="Durations"/> ağırlıklı ortalaması (≈ 6,2 gün).</summary>
+    private static readonly double MeanRentalDays = Durations.Sum(d => d.Days * d.Weight) / Durations.Sum(d => d.Weight);
+
     public async Task RunAsync(SimContext ctx, SimState state, int fleetSize, CancellationToken ct)
     {
         var elapsedDays = Math.Clamp((ctx.Now - state.LastDemandAt).TotalDays, 0, 2);
@@ -50,24 +65,60 @@ internal sealed class DemandGenerator(IReservationsApi reservations, IOptions<Si
             return;
         }
 
+        var o = options.Value;
+        var booked = await BookedAsync(ctx, ct);
         var month = KktcTime.ToLocal(ctx.Now).Month;
-        var perDay = fleetSize * MonthlyOccupancy[month] / AverageRentalDays * 1.15 * options.Value.DemandMultiplier;
-        var count = Math.Min(20, ctx.Rng.Poisson(perDay * elapsedDays));
+        var perDay = fleetSize * MonthlyOccupancy[month] / AverageRentalDays * 1.15 * o.DemandMultiplier;
+        if (o.TargetUtilization > 0)
+        {
+            // Kirada araç ≈ günlük kiralama × ortalama süre: düzenli talep tek başına hedefi aşmasın.
+            perDay = Math.Min(perDay, fleetSize * o.TargetUtilization / MeanRentalDays);
+        }
+
+        var count = Math.Min(200, ctx.Rng.Poisson(perDay * elapsedDays));
         for (var i = 0; i < count; i++)
         {
-            await BookOneAsync(ctx, state, ct);
+            await BookOneAsync(ctx, state, booked, fleetSize, walkIn: false, ct);
+        }
+
+        // Açık üstel olarak kapanır: kare uzun da olsa (hızlı ileri sarma) hedef aşılmaz.
+        var gap = fleetSize * o.TargetUtilization - OnRentAt(booked, ctx.Now + WalkInHorizon);
+        var walkIns = gap > 0
+            ? Math.Min((int)Math.Ceiling(gap), ctx.Rng.Poisson(gap * (1 - Math.Exp(-WalkInFillPerDay * elapsedDays))))
+            : 0;
+        for (var i = 0; i < walkIns; i++)
+        {
+            await BookOneAsync(ctx, state, booked, fleetSize, walkIn: true, ct);
         }
     }
 
-    private async Task BookOneAsync(SimContext ctx, SimState state, CancellationToken ct)
+    /// <summary>Kirada olanlar (şimdi → iade) ve <see cref="CeilingHorizon"/> içinde teslim edilecekler (teslim → iade).</summary>
+    private async Task<List<(DateTimeOffset From, DateTimeOffset To)>> BookedAsync(SimContext ctx, CancellationToken ct)
+    {
+        var active = await reservations.ListDueAsync(ReservationStatus.Active, ctx.Now.AddYears(1), 500, ct);
+        var upcoming = await reservations.ListDueAsync(ReservationStatus.Confirmed, ctx.Now + CeilingHorizon, 500, ct);
+        return [.. active.Select(r => (ctx.Now, r.ReturnAt)), .. upcoming.Select(r => (r.PickupAt, r.ReturnAt))];
+    }
+
+    private static int OnRentAt(List<(DateTimeOffset From, DateTimeOffset To)> booked, DateTimeOffset at) =>
+        booked.Count(b => b.From <= at && b.To > at);
+
+    private async Task BookOneAsync(
+        SimContext ctx, SimState state, List<(DateTimeOffset From, DateTimeOffset To)> booked, int fleetSize, bool walkIn, CancellationToken ct)
     {
         var rng = ctx.Rng;
         var pickupBranch = rng.Pick(ctx.Branches, b => PickupWeights.GetValueOrDefault(b.Code, 1));
-        var pickupAt = PickupTime(ctx, pickupBranch);
+        var pickupAt = walkIn ? WalkInPickupTime(ctx, pickupBranch) : PickupTime(ctx, pickupBranch);
         var days = rng.Pick(Durations, d => d.Weight).Days;
         var returnBranch = ReturnBranch(ctx, pickupBranch);
         var returnLocal = KktcTime.ToLocal(pickupAt).AddDays(days).AddMinutes(rng.Next(-8, 5) * 15);
         var returnAt = ctx.LocalToUtc(DateOnly.FromDateTime(returnLocal.DateTime), Math.Clamp(returnLocal.Hour, 7, 21), returnLocal.Minute / 15 * 15);
+
+        var ceiling = fleetSize * options.Value.MaxUtilization;
+        if (ceiling > 0 && pickupAt <= ctx.Now + CeilingHorizon && OnRentAt(booked, pickupAt) >= ceiling)
+        {
+            return;
+        }
 
         var (customer, age) = CustomerFactory.Create(rng, KktcTime.LocalDate(pickupAt));
         var category = rng.Pick(ctx.Categories.Where(c => c.MinDriverAge <= age).ToList(), c => CategoryWeights.GetValueOrDefault(c.Code, 3));
@@ -77,6 +128,7 @@ internal sealed class DemandGenerator(IReservationsApi reservations, IOptions<Si
             var r = await reservations.CreateAsync(new CreateReservationRequest(
                 null, customer, category.Id, pickupBranch.Id, returnBranch.Id, pickupAt, returnAt,
                 Extras(rng, pickupBranch), BookingChannel.Simulation), ct);
+            booked.Add((r.PickupAt, r.ReturnAt));
             state.ReservationsCreated++;
             log.Write(ctx.Now, "reservation",
                 $"{r.Code}: {r.CustomerName} ({customer.Nationality}) · {category.Name} · {pickupBranch.Name} → {returnBranch.Name} · " +
@@ -136,6 +188,29 @@ internal sealed class DemandGenerator(IReservationsApi reservations, IOptions<Si
         var at = ctx.LocalToUtc(day, hour, rng.Next(0, 4) * 15);
         var earliest = ctx.Now.AddMinutes(90);
         return at < earliest ? ctx.LocalToUtc(KktcTime.LocalDate(earliest), KktcTime.ToLocal(earliest).Hour, 0).AddHours(1) : at;
+    }
+
+    /// <summary>Kısa vadeli talep: 1,5–6 saat sonra; ofis/liman kapalıysa ertesi açılışta. Havalimanı ve kapılar gece de açık.</summary>
+    private static DateTimeOffset WalkInPickupTime(SimContext ctx, BranchDto branch)
+    {
+        var rng = ctx.Rng;
+        var at = ctx.Now.AddMinutes(rng.Next(90, 360));
+        var local = KktcTime.ToLocal(at);
+        var (opens, closes) = branch.Type switch
+        {
+            BranchType.Office => (9, 18),
+            BranchType.PortDesk => (8, 20),
+            _ => (0, 24),
+        };
+        var day = DateOnly.FromDateTime(local.DateTime);
+        if (local.Hour < opens)
+        {
+            return ctx.LocalToUtc(day, opens + rng.Next(0, 3), rng.Next(0, 4) * 15);
+        }
+
+        return local.Hour >= closes
+            ? ctx.LocalToUtc(day.AddDays(1), opens + rng.Next(0, 3), rng.Next(0, 4) * 15)
+            : ctx.LocalToUtc(day, local.Hour, local.Minute / 15 * 15);
     }
 
     /// <summary>Ercan'dan alanlar çoğunlukla Ercan'a, sınır kapısından alanlar aynı kapıya döner (uçuş Larnaka'dan).</summary>

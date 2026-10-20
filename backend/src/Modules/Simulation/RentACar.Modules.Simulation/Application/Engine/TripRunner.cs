@@ -54,7 +54,7 @@ internal sealed class TripRunner(RouteService routes, IFleetApi fleet, IReservat
                     return;
                 }
 
-                if (trip.Kind != TripKind.Rental && trip.LegStartedAt is null && trip.Purpose is LegPurpose.ToPickupBranch or LegPurpose.ToOffice)
+                if (trip.Kind != TripKind.Rental && trip.LegStartedAt is null && trip.Purpose is LegPurpose.ToPickupBranch or LegPurpose.ToOffice or LegPurpose.ToService)
                 {
                     await fleet.SetInTransitAsync(trip.VehicleId, true, null, ct);
                 }
@@ -106,10 +106,16 @@ internal sealed class TripRunner(RouteService routes, IFleetApi fleet, IReservat
         {
             case LegPurpose.ToPickupBranch:
             case LegPurpose.ToOffice:
+            case LegPurpose.FromService:
                 await fleet.SetInTransitAsync(trip.VehicleId, false, trip.TargetBranchId, ct);
                 trip.Finish(ctx.Now);
                 log.Write(ctx.Now, trip.Kind == TripKind.Delivery ? "delivered" : "repositioned",
                     $"{trip.Plate} vardı · {trip.DestinationName}", trip.VehicleId, trip.ReservationCode);
+                break;
+
+            case LegPurpose.ToService:
+                var home = ctx.Branch(trip.TargetBranchId) ?? ctx.NearestStock(trip.To);
+                trip.PlanLeg(LegPurpose.FromService, home.Name, trip.To, home.Location, arrivedAt.AddMinutes(ctx.Rng.Next(20, 60)));
                 break;
 
             case LegPurpose.ToReturnBranch:

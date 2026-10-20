@@ -15,6 +15,12 @@ namespace RentACar.Modules.Simulation.Application.Engine;
 internal static class ItineraryPlanner
 {
     private static readonly TimeSpan ReturnBuffer = TimeSpan.FromMinutes(30);
+
+    /// <summary>Gezi noktasında park yeri dağılımı (otopark, sahil, kale girişi…).</summary>
+    private const double AttractionSpreadMeters = 250;
+
+    /// <summary>Kasaba merkezinde restoran/eğlence yeri dağılımı.</summary>
+    public const double TownSpreadMeters = 900;
     private static readonly TimeSpan PlannedDwell = TimeSpan.FromHours(2);
 
     public static void PlanNext(Trip trip, SimContext ctx, DateTimeOffset arrivedAt)
@@ -44,7 +50,7 @@ internal static class ItineraryPlanner
                 if (leaveAt + tour <= latestDepart)
                 {
                     trip.LastAttraction = next.Name;
-                    trip.PlanLeg(LegPurpose.Excursion, next.Name, here, next.Location, leaveAt);
+                    trip.PlanLeg(LegPurpose.Excursion, next.Name, here, SimContext.Scatter(next.Location, AttractionSpreadMeters, rng), leaveAt);
                     return;
                 }
             }
@@ -64,7 +70,7 @@ internal static class ItineraryPlanner
             var dinnerAt = arrivedAt.AddMinutes(rng.Next(45, 120));
             if (dinnerAt + SimContext.EstimateTravel(here, town.Location) * 2 + PlannedDwell <= latestDepart)
             {
-                trip.PlanLeg(LegPurpose.Excursion, $"Akşam yemeği · {town.Name}", here, town.Location, dinnerAt);
+                trip.PlanLeg(LegPurpose.Excursion, $"Akşam yemeği · {town.Name}", here, SimContext.Scatter(town.Location, TownSpreadMeters, rng), dinnerAt);
                 return;
             }
         }
@@ -87,7 +93,7 @@ internal static class ItineraryPlanner
         }
 
         trip.LastAttraction = attraction.Name;
-        trip.PlanLeg(LegPurpose.Excursion, attraction.Name, here, attraction.Location, departAt);
+        trip.PlanLeg(LegPurpose.Excursion, attraction.Name, here, SimContext.Scatter(attraction.Location, AttractionSpreadMeters, rng), departAt);
     }
 
     /// <summary>Son gidilen hariç bir gezi noktası; büyük ve <paramref name="from"/>'a yakın olan ağır basar.</summary>

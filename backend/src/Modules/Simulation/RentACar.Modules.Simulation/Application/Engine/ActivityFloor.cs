@@ -1,6 +1,4 @@
 using Microsoft.Extensions.Options;
-using RentACar.Modules.Branches.Contracts.Dtos;
-using RentACar.Modules.Branches.Contracts.Enums;
 using RentACar.Modules.Fleet.Contracts;
 using RentACar.Modules.Fleet.Contracts.Enums;
 using RentACar.Modules.Reservations.Contracts;
@@ -8,28 +6,44 @@ using RentACar.Modules.Reservations.Contracts.Enums;
 using RentACar.Modules.Simulation.Application.Options;
 using RentACar.Modules.Simulation.Domain.Entities;
 using RentACar.Modules.Simulation.Domain.Enums;
+using RentACar.Shared.Abstractions.Geo;
 using RentACar.Shared.Abstractions.Time;
 
 namespace RentACar.Modules.Simulation.Application.Engine;
 
 /// <summary>
 /// Asgari hareket (güçlü filo varsayımı): haritada her an en az <see cref="SimulationOptions.MinMovingVehicles"/> araç
-/// yolda olsun. Eksik varsa önce park hâlindeki müşteriler erken yola çıkar (gece: kasabaya eğlenceye), yetmezse
-/// operasyon ekibi boştaki araçları şubeler arasında transfer eder (gece vardiyası sabah uçuşları için Ercan'a ağırlık
-/// verir). Kalkışlar birkaç dakikaya yayılır; hızlı ileri sarma (yetişme) sırasında çağrılmaz.
+/// yolda olsun. Hareketin asıl kaynağı müşterilerdir (bkz. <see cref="SimulationOptions.TargetUtilization"/>); burası
+/// yalnız açığı doğal görünen yollarla kapatır:
+/// <list type="bullet">
+/// <item>gündüz: yakında (2 saat içinde) zaten çıkacak müşteri biraz erken yola çıkar; ertesi sabahı bekleyen park hâlinde kalır,</item>
+/// <item>akşam (20–01): konaklamadaki müşterinin bir kısmı kasabaya eğlenceye çıkar,</item>
+/// <item>yetmezse boştaki araçlar farklı kasabalara servis turuna (yıkama/bakım) gidip şubesine döner.</item>
+/// </list>
+/// Konvoy olmasın diye her karede az sayıda, aynı şubeden 1–3 dk arayla ve farklı kasabalara kalkış planlanır.
+/// Hızlı ileri sarma (yetişme) sırasında çağrılmaz.
 /// </summary>
 internal sealed class ActivityFloor(IReservationsApi reservations, IFleetApi fleet, IOptions<SimulationOptions> options, EventLog log)
 {
-    /// <summary>Bir operasyon karesinde en çok bu kadar yeni kalkış: araçlar aynı anda yola çıkıp aynı anda varmasın.</summary>
-    private const int MaxStartsPerRun = 6;
+    /// <summary>Bir operasyon karesinde (≈2 sn) en çok bu kadar yeni kalkış.</summary>
+    private const int MaxStartsPerRun = 2;
 
-    /// <summary>Bu kadar içinde kalkacak bacak "yolda" sayılır (yeni kalkışlar 1–8 dk sonrasına planlanır).</summary>
-    private static readonly TimeSpan Imminent = TimeSpan.FromMinutes(10);
+    /// <summary>Kalkmak üzere olanlar da sayıldığı için hedefe pay: yoldaki araç asgarinin altına düşmesin.</summary>
+    private const double Headroom = 1.1;
+
+    /// <summary>Servis noktasının kasaba merkezine en uzak mesafesi.</summary>
+    private const double ServiceSpreadMeters = 1_500;
+
+    /// <summary>Bu kadar içinde kalkacak bacak "yolda" sayılır.</summary>
+    private static readonly TimeSpan Imminent = TimeSpan.FromMinutes(5);
+
+    /// <summary>Gündüz yalnız bu kadar içinde zaten yola çıkacak müşteri öne çekilir.</summary>
+    private static readonly TimeSpan PullForwardWindow = TimeSpan.FromHours(2);
 
     /// <summary>İadesine bundan az kalan müşteri ek geziye çıkarılmaz.</summary>
     private static readonly TimeSpan ReturnMargin = TimeSpan.FromHours(4);
 
-    /// <summary>Teslimi bu kadar içinde olan araç transfere çıkarılmaz.</summary>
+    /// <summary>Teslimi bu kadar içinde olan araç servis turuna çıkarılmaz.</summary>
     private static readonly TimeSpan PickupHorizon = TimeSpan.FromHours(12);
 
     public static int CountMoving(IEnumerable<Trip> trips, DateTimeOffset now) =>
@@ -37,46 +51,57 @@ internal sealed class ActivityFloor(IReservationsApi reservations, IFleetApi fle
 
     public async Task RunAsync(SimContext ctx, List<Trip> trips, Action<Trip> addTrip, CancellationToken ct)
     {
-        var deficit = Math.Min(options.Value.MinMovingVehicles - CountMoving(trips, ctx.Now), MaxStartsPerRun);
+        var target = (int)Math.Ceiling(options.Value.MinMovingVehicles * Headroom);
+        var deficit = Math.Min(target - CountMoving(trips, ctx.Now), MaxStartsPerRun);
         if (deficit <= 0)
         {
             return;
         }
 
-        // Gece (00–07) dışarıda olan müşteri az; açığın çoğunu operasyon kapatır.
-        var night = KktcTime.ToLocal(ctx.Now).Hour < 7;
-        var started = SendCustomersOut(ctx, trips, night ? (deficit + 2) / 3 : deficit, night);
+        var started = SendCustomersOut(ctx, trips, deficit);
         if (started < deficit)
         {
-            await TransferIdleAsync(ctx, trips, addTrip, deficit - started, night, ct);
+            await SendIdleToServiceAsync(ctx, trips, addTrip, deficit - started, ct);
         }
     }
 
-    /// <summary>
-    /// Park hâlindeki müşteri bacağını öne çeker: gündüz planlı bir sonraki hareket hemen başlar; gece konaklamadaki
-    /// müşteri en yakın kasabaya eğlenceye çıkar. Dönüş ve iade yine <see cref="ItineraryPlanner"/>'a kalır.
-    /// </summary>
-    internal static int SendCustomersOut(SimContext ctx, IEnumerable<Trip> trips, int count, bool night)
+    /// <summary>Müşteri bacağını öne çeker ya da (akşam) kasabaya eğlenceye çıkarır. Dönüş ve iade <see cref="ItineraryPlanner"/>'da.</summary>
+    internal static int SendCustomersOut(SimContext ctx, IEnumerable<Trip> trips, int count)
     {
         if (count <= 0)
         {
             return 0;
         }
 
-        var chosen = trips
+        var hour = KktcTime.ToLocal(ctx.Now).Hour;
+        var evening = hour is >= 20 or < 1;
+        var daytime = hour is >= 7 and < 20;
+        var parked = trips
             .Where(t => t is { Kind: TripKind.Rental, State: TripState.Waiting, Purpose: LegPurpose.Excursion or LegPurpose.BackToStay }
                 && t.DepartAt > ctx.Now + Imminent
                 && t.ReturnAt - ctx.Now > ReturnMargin)
-            .OrderBy(_ => ctx.Rng.Next())
-            .Take(count)
             .ToList();
-        foreach (var trip in chosen)
+
+        IEnumerable<Trip> chosen = [];
+        if (daytime)
         {
-            var departAt = ctx.Now.AddMinutes(ctx.Rng.Next(1, 9));
-            if (night && trip.Purpose == LegPurpose.Excursion)
+            chosen = parked.Where(t => t.DepartAt <= ctx.Now + PullForwardWindow);
+        }
+        else if (evening)
+        {
+            // Konaklamada (bir sonraki gezisi yarın sabah) olanlardan.
+            chosen = parked.Where(t => t.Purpose == LegPurpose.Excursion && t.DepartAt > ctx.Now + TimeSpan.FromHours(6));
+        }
+
+        var picked = chosen.OrderBy(_ => ctx.Rng.Next()).Take(count).ToList();
+        foreach (var trip in picked)
+        {
+            var departAt = ctx.Now.AddMinutes(ctx.Rng.Next(2, 13));
+            if (evening)
             {
                 var town = ctx.NearbyTown(trip.From);
-                trip.PlanLeg(LegPurpose.Excursion, $"Gece eğlencesi · {town.Name}", trip.From, town.Location, departAt);
+                var spot = SimContext.Scatter(town.Location, ItineraryPlanner.TownSpreadMeters, ctx.Rng);
+                trip.PlanLeg(LegPurpose.Excursion, $"Gece eğlencesi · {town.Name}", trip.From, spot, departAt);
             }
             else
             {
@@ -84,13 +109,18 @@ internal sealed class ActivityFloor(IReservationsApi reservations, IFleetApi fle
             }
         }
 
-        return chosen.Count;
+        return picked.Count;
     }
 
-    private async Task TransferIdleAsync(SimContext ctx, List<Trip> trips, Action<Trip> addTrip, int count, bool night, CancellationToken ct)
+    /// <summary>
+    /// Boştaki araç (yakında teslimi yok) servis turuna çıkar: yakın bir kasabadaki servis noktası → bekleme → aynı şube.
+    /// Aynı şubeden kalkışlar arasında 1–3 dk olur, aynı şubeden aynı kasabaya aynı anda iki tur gitmez.
+    /// </summary>
+    private async Task SendIdleToServiceAsync(SimContext ctx, List<Trip> trips, Action<Trip> addTrip, int count, CancellationToken ct)
     {
-        var busy = trips.Where(t => t.State != TripState.Finished).Select(t => t.VehicleId).ToHashSet();
-        var due = await reservations.ListDueAsync(ReservationStatus.Confirmed, ctx.Now + PickupHorizon, 1000, ct);
+        var active = trips.Where(t => t.State != TripState.Finished).ToList();
+        var busy = active.Select(t => t.VehicleId).ToHashSet();
+        var due = await reservations.ListDueAsync(ReservationStatus.Confirmed, ctx.Now + PickupHorizon, 500, ct);
         busy.UnionWith(due.Select(r => r.VehicleId));
         var stock = ctx.StockBranches.Select(b => b.Id).ToHashSet();
         var idle = (await fleet.ListRentableVehiclesAsync(null, ct))
@@ -98,6 +128,7 @@ internal sealed class ActivityFloor(IReservationsApi reservations, IFleetApi fle
             .OrderBy(_ => ctx.Rng.Next())
             .ToList();
 
+        var services = active.Where(t => t.Purpose == LegPurpose.ToService).ToList();
         var started = 0;
         foreach (var candidate in idle)
         {
@@ -107,24 +138,38 @@ internal sealed class ActivityFloor(IReservationsApi reservations, IFleetApi fle
             }
 
             var vehicle = await fleet.GetVehicleAsync(candidate.Id, ct);
-            if (vehicle is not { Status: VehicleStatus.Available, BranchId: { } fromId })
+            if (vehicle is not { Status: VehicleStatus.Available, BranchId: { } branchId } || ctx.Branch(branchId) is not { } branch)
             {
                 continue;
             }
 
-            var target = TransferTarget(ctx, fromId, night);
+            // Aynı şubeden son kalkışın ardından 1–3 dk.
+            var lastFromHere = services
+                .Where(t => t.TargetBranchId == branchId && t.State == TripState.Waiting)
+                .Select(t => (DateTimeOffset?)t.DepartAt)
+                .Max();
+            var departAt = Max(ctx.Now.AddMinutes(ctx.Rng.Next(1, 4)), (lastFromHere ?? ctx.Now).AddMinutes(ctx.Rng.Next(1, 4)));
+
+            var takenTowns = services.Where(t => t.TargetBranchId == branchId).Select(t => t.DestinationName).ToHashSet();
+            var towns = ctx.Places.Stays.Where(s => !takenTowns.Contains(ServiceName(s.Name))).ToList();
+            if (towns.Count == 0)
+            {
+                continue;
+            }
+
+            var town = ctx.Rng.Pick(towns, s => s.Weight / (1 + GeoMath.DistanceMeters(branch.Location, s.Location) / 15_000));
             var trip = FleetDispatcher.NewTrip(TripKind.Reposition, vehicle, ctx.Now);
-            trip.TargetBranchId = target.Id;
-            trip.PlanLeg(LegPurpose.ToOffice, target.Name, vehicle.Position, target.Location, ctx.Now.AddMinutes(ctx.Rng.Next(1, 9)));
+            trip.TargetBranchId = branchId;
+            trip.PlanLeg(LegPurpose.ToService, ServiceName(town.Name), vehicle.Position,
+                SimContext.Scatter(town.Location, ServiceSpreadMeters, ctx.Rng), departAt);
             addTrip(trip);
-            log.Write(ctx.Now, "reposition", $"{vehicle.Plate} {ctx.Branch(fromId)?.Name} → {target.Name} filo transferi planlandı", vehicle.Id);
+            services.Add(trip);
+            log.Write(ctx.Now, "reposition", $"{vehicle.Plate} {branch.Name} → servis turu ({town.Name})", vehicle.Id);
             started++;
         }
     }
 
-    /// <summary>Başka bir stok şubesi; havalimanı ağır basar (gece daha da: sabah uçuşları).</summary>
-    private static BranchDto TransferTarget(SimContext ctx, Guid fromId, bool night) =>
-        ctx.Rng.Pick(
-            ctx.StockBranches.Where(b => b.Id != fromId).ToList(),
-            b => b.Type == BranchType.AirportDesk ? (night ? 6 : 3) : 2);
+    private static string ServiceName(string town) => $"Servis · {town}";
+
+    private static DateTimeOffset Max(DateTimeOffset a, DateTimeOffset b) => a > b ? a : b;
 }

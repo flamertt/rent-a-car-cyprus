@@ -21,6 +21,9 @@ namespace RentACar.Modules.Simulation.Application.Engine;
 internal sealed class FleetDispatcher(IReservationsApi reservations, IFleetApi fleet, EventLog log)
 {
     private const double NoShowProbability = 0.04;
+
+    /// <summary>Otellerin konaklama bölgesi merkezine en uzak mesafesi.</summary>
+    private const double HotelSpreadMeters = 1_400;
     private static readonly CultureInfo Tr = CultureInfo.GetCultureInfo("tr-TR");
 
     public async Task RunAsync(SimContext ctx, SimState state, List<Trip> trips, Action<Trip> addTrip, CancellationToken ct)
@@ -102,7 +105,10 @@ internal sealed class FleetDispatcher(IReservationsApi reservations, IFleetApi f
 
     private static Trip NewRentalTrip(SimContext ctx, ReservationDto r, VehicleDto vehicle)
     {
-        var stay = SimRandom.For(r.CustomerId).Pick(ctx.Places.Stays, s => s.Weight);
+        // Konaklama bölgesi içinde müşteriye özgü otel noktası: aynı bölgedekiler aynı noktadan aynı rotaya çıkmasın.
+        var customer = SimRandom.For(r.CustomerId);
+        var stay = customer.Pick(ctx.Places.Stays, s => s.Weight);
+        var hotel = SimContext.Scatter(stay.Location, HotelSpreadMeters, customer);
         var trip = NewTrip(TripKind.Rental, vehicle, ctx.Now);
         trip.ReservationId = r.Id;
         trip.ReservationCode = r.Code;
@@ -110,9 +116,9 @@ internal sealed class FleetDispatcher(IReservationsApi reservations, IFleetApi f
         trip.TargetBranchId = r.ReturnBranchId;
         trip.ReturnAt = r.ReturnAt;
         trip.StayName = stay.Name;
-        trip.StayLon = stay.Location.Lon;
-        trip.StayLat = stay.Location.Lat;
-        trip.PlanLeg(LegPurpose.ToStay, stay.Name, vehicle.Position, stay.Location, ctx.Now.AddMinutes(10));
+        trip.StayLon = hotel.Lon;
+        trip.StayLat = hotel.Lat;
+        trip.PlanLeg(LegPurpose.ToStay, stay.Name, vehicle.Position, hotel, ctx.Now.AddMinutes(ctx.Rng.Next(10, 40)));
         return trip;
     }
 
