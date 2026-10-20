@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Shared\RentACar.Shared.Abstractions\RentACar.Shared.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Fleet\RentACar.Modules.Fleet.Contracts\RentACar.Modules.Fleet.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

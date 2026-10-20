@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <UserSecretsId>rentacar-kktc-api</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Scalar.AspNetCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Shared\RentACar.Shared.Infrastructure\RentACar.Shared.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Modules\Auth\RentACar.Modules.Auth\RentACar.Modules.Auth.csproj" />
+    <ProjectReference Include="..\..\Modules\Branches\RentACar.Modules.Branches\RentACar.Modules.Branches.csproj" />
+    <ProjectReference Include="..\..\Modules\Fleet\RentACar.Modules.Fleet\RentACar.Modules.Fleet.csproj" />
+    <ProjectReference Include="..\..\Modules\Pricing\RentACar.Modules.Pricing\RentACar.Modules.Pricing.csproj" />
+    <ProjectReference Include="..\..\Modules\Customers\RentACar.Modules.Customers\RentACar.Modules.Customers.csproj" />
+    <ProjectReference Include="..\..\Modules\Reservations\RentACar.Modules.Reservations\RentACar.Modules.Reservations.csproj" />
+    <ProjectReference Include="..\..\Modules\Simulation\RentACar.Modules.Simulation\RentACar.Modules.Simulation.csproj" />
+  </ItemGroup>
+
+</Project>

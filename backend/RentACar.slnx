@@ -1,0 +1,40 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Bootstrapper/">
+    <Project Path="src/Bootstrapper/RentACar.Api/RentACar.Api.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/" />
+  <Folder Name="/src/Modules/Auth/">
+    <Project Path="src/Modules/Auth/RentACar.Modules.Auth/RentACar.Modules.Auth.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Branches/">
+    <Project Path="src/Modules/Branches/RentACar.Modules.Branches.Contracts/RentACar.Modules.Branches.Contracts.csproj" />
+    <Project Path="src/Modules/Branches/RentACar.Modules.Branches/RentACar.Modules.Branches.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Customers/">
+    <Project Path="src/Modules/Customers/RentACar.Modules.Customers.Contracts/RentACar.Modules.Customers.Contracts.csproj" />
+    <Project Path="src/Modules/Customers/RentACar.Modules.Customers/RentACar.Modules.Customers.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Fleet/">
+    <Project Path="src/Modules/Fleet/RentACar.Modules.Fleet.Contracts/RentACar.Modules.Fleet.Contracts.csproj" />
+    <Project Path="src/Modules/Fleet/RentACar.Modules.Fleet/RentACar.Modules.Fleet.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Pricing/">
+    <Project Path="src/Modules/Pricing/RentACar.Modules.Pricing.Contracts/RentACar.Modules.Pricing.Contracts.csproj" />
+    <Project Path="src/Modules/Pricing/RentACar.Modules.Pricing/RentACar.Modules.Pricing.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Reservations/">
+    <Project Path="src/Modules/Reservations/RentACar.Modules.Reservations.Contracts/RentACar.Modules.Reservations.Contracts.csproj" />
+    <Project Path="src/Modules/Reservations/RentACar.Modules.Reservations/RentACar.Modules.Reservations.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Simulation/">
+    <Project Path="src/Modules/Simulation/RentACar.Modules.Simulation/RentACar.Modules.Simulation.csproj" />
+  </Folder>
+  <Folder Name="/src/Shared/">
+    <Project Path="src/Shared/RentACar.Shared.Abstractions/RentACar.Shared.Abstractions.csproj" />
+    <Project Path="src/Shared/RentACar.Shared.Infrastructure/RentACar.Shared.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/RentACar.UnitTests/RentACar.UnitTests.csproj" />
+  </Folder>
+</Solution>

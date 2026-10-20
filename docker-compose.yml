@@ -1,0 +1,36 @@
+# Yerel geliştirme altyapısı. API ve frontend makinede çalışır (dotnet run / npm run dev).
+#   docker compose up -d                          # PostgreSQL + PostGIS
+#   bash scripts/osrm-hazirla.sh                  # (bir kez) OSRM verisini hazırla
+#   docker compose --profile routing up -d osrm   # gerçek yol rotaları
+services:
+  postgres:
+    image: postgis/postgis:17-3.5
+    container_name: rentacar-postgres
+    environment:
+      POSTGRES_DB: rentacar
+      POSTGRES_USER: rentacar
+      POSTGRES_PASSWORD: rentacar_dev
+    ports:
+      # 5433: makinede kurulu başka bir PostgreSQL ile çakışmasın. Bağlantıda 127.0.0.1 kullanın:
+      # WSL, [::1]:5433'ü kendine yönlendirebiliyor (localhost → IPv6 → yanlış süreç).
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rentacar -d rentacar"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v6.0.0
+    container_name: rentacar-osrm
+    profiles: ["routing"]
+    command: osrm-routed --algorithm mld --max-table-size 1000 /data/cyprus-latest.osrm
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - ./infra/osrm:/data
+
+volumes:
+  pgdata:

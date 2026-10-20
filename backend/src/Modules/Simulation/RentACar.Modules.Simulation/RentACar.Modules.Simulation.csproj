@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="RentACar.UnitTests" />
+    <EmbeddedResource Include="Infrastructure\Places\places.json" LogicalName="RentACar.Simulation.places.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Shared\RentACar.Shared.Infrastructure\RentACar.Shared.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Branches\RentACar.Modules.Branches.Contracts\RentACar.Modules.Branches.Contracts.csproj" />
+    <ProjectReference Include="..\..\Fleet\RentACar.Modules.Fleet.Contracts\RentACar.Modules.Fleet.Contracts.csproj" />
+    <ProjectReference Include="..\..\Reservations\RentACar.Modules.Reservations.Contracts\RentACar.Modules.Reservations.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

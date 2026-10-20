@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="RentACar.UnitTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Shared\RentACar.Shared.Infrastructure\RentACar.Shared.Infrastructure.csproj" />
+    <ProjectReference Include="..\RentACar.Modules.Pricing.Contracts\RentACar.Modules.Pricing.Contracts.csproj" />
+    <ProjectReference Include="..\..\Branches\RentACar.Modules.Branches.Contracts\RentACar.Modules.Branches.Contracts.csproj" />
+    <ProjectReference Include="..\..\Fleet\RentACar.Modules.Fleet.Contracts\RentACar.Modules.Fleet.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

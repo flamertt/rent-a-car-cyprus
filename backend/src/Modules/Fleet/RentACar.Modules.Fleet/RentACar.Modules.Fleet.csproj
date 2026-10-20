@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Shared\RentACar.Shared.Infrastructure\RentACar.Shared.Infrastructure.csproj" />
+    <ProjectReference Include="..\RentACar.Modules.Fleet.Contracts\RentACar.Modules.Fleet.Contracts.csproj" />
+    <ProjectReference Include="..\..\Branches\RentACar.Modules.Branches.Contracts\RentACar.Modules.Branches.Contracts.csproj" />
+    <ProjectReference Include="..\..\Reservations\RentACar.Modules.Reservations.Contracts\RentACar.Modules.Reservations.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

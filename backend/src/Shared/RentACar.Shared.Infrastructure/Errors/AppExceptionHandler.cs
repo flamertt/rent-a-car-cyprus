@@ -14,6 +14,7 @@ internal sealed class AppExceptionHandler(IProblemDetailsService problemDetails)
         {
             NotFoundException => (StatusCodes.Status404NotFound, "not_found"),
             ConflictException c => (StatusCodes.Status409Conflict, c.Code),
+            UnauthorizedException u => (StatusCodes.Status401Unauthorized, u.Code),
             DomainException d => (StatusCodes.Status422UnprocessableEntity, d.Code),
             BadHttpRequestException => (StatusCodes.Status400BadRequest, "bad_request"),
             _ => (0, string.Empty),

@@ -1,10 +1,5 @@
 namespace RentACar.Shared.Abstractions.Common;
 
-public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Page, int PageSize, int Total)
-{
-    public int TotalPages => PageSize == 0 ? 0 : (int)Math.Ceiling(Total / (double)PageSize);
-}
-
 public static class Paging
 {
     public const int MaxPageSize = 200;
